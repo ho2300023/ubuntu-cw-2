@@ -1,2 +1,4 @@
 admin:admin123
 teacher:teach123
+hamza:hamza123
+tester:tester123
