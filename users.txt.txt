@@ -1,4 +1,4 @@
-admin:admin123
-teacher:teach123
-hamza:hamza123
-tester:tester123
+admin:admin123:Top
+teacher:teach123:Medium
+hamza:hamza123:Entry
+tester:tester123:Entry

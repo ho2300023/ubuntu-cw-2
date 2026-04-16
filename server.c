@@ -9,7 +9,8 @@
 #define PORT 8080
 #define BUFFER_SIZE 1024
 
-int authenticate(char *credentials) {
+// Authenticate and return role
+int authenticate(char *credentials, char *role) {
     FILE *file = fopen("users.txt", "r");
     if (!file) {
         perror("users.txt not found");
@@ -18,7 +19,19 @@ int authenticate(char *credentials) {
     char line[BUFFER_SIZE];
     while (fgets(line, sizeof(line), file)) {
         line[strcspn(line, "\n")] = 0;
-        if (strcmp(line, credentials) == 0) {
+
+        // Split line into user, pass, role
+        char *user = strtok(line, ":");
+        char *pass = strtok(NULL, ":");
+        char *userrole = strtok(NULL, ":");
+
+        if (!user || !pass || !userrole) continue;
+
+        char temp[BUFFER_SIZE];
+        snprintf(temp, sizeof(temp), "%s:%s", user, pass);
+
+        if (strcmp(temp, credentials) == 0) {
+            strcpy(role, userrole);
             fclose(file);
             return 1;
         }
@@ -27,18 +40,33 @@ int authenticate(char *credentials) {
     return 0;
 }
 
+// Run command and send output back to client
+void run_command_and_send(int client_socket, const char *cmd) {
+    char output[BUFFER_SIZE];
+    FILE *fp = popen(cmd, "r");
+    if (fp == NULL) {
+        send(client_socket, "Failed to run command\n", 23, 0);
+        return;
+    }
+    while (fgets(output, sizeof(output), fp) != NULL) {
+        send(client_socket, output, strlen(output), 0);
+    }
+    pclose(fp);
+}
+
 void *handle_client(void *arg) {
     int client_socket = *(int*)arg;
     free(arg);
 
     char buffer[BUFFER_SIZE];
     int bytes_read;
+    char role[50];
 
     // Receive credentials
     memset(buffer, 0, BUFFER_SIZE);
     bytes_read = read(client_socket, buffer, BUFFER_SIZE);
 
-    if (!authenticate(buffer)) {
+    if (!authenticate(buffer, role)) {
         printf("Authentication failed\n");
         send(client_socket, "FAIL", 4, 0);
         close(client_socket);
@@ -47,24 +75,37 @@ void *handle_client(void *arg) {
 
     send(client_socket, "OK", 2, 0);
     printf("Authentication successful\n");
-    printf("%s logged in\n", buffer);
+    printf("%s logged in with role %s\n", buffer, role);
 
-    // Receive encrypted message
-    memset(buffer, 0, BUFFER_SIZE);
-    bytes_read = read(client_socket, buffer, BUFFER_SIZE);
-    decrypt(buffer, bytes_read);
-    bytes_read = unpad_data(buffer, bytes_read);
-    buffer[bytes_read] = '\0';
-    printf("Incoming message decrypted\n");
-    printf("Client: %s\n", buffer);
+    // Command loop
+    while ((bytes_read = read(client_socket, buffer, BUFFER_SIZE)) > 0) {
+        buffer[bytes_read] = '\0';
 
-    // Send encrypted response
-    char response[BUFFER_SIZE] = "Hello from server";
-    int resp_len = strlen(response);
-    resp_len = pad_data(response, resp_len);
-    encrypt(response, resp_len);
-    send(client_socket, response, resp_len, 0);
-    printf("Ongoing message encrypted\n");
+        // Exit condition
+        if (strcmp(buffer, "exit") == 0) {
+            printf("Client disconnected\n");
+            break;
+        }
+
+        // Role-based restrictions
+        if (strcmp(role, "Entry") == 0) {
+            if (strncmp(buffer, "ls", 2) == 0 || strncmp(buffer, "cat", 3) == 0) {
+                run_command_and_send(client_socket, buffer);
+            } else {
+                send(client_socket, "Permission denied\n", 18, 0);
+            }
+        } else if (strcmp(role, "Medium") == 0) {
+            if (strstr(buffer, "rm")) {
+                send(client_socket, "Delete not allowed\n", 19, 0);
+            } else {
+                run_command_and_send(client_socket, buffer);
+            }
+        } else if (strcmp(role, "Top") == 0) {
+            run_command_and_send(client_socket, buffer);
+        } else {
+            send(client_socket, "Unknown role\n", 13, 0);
+        }
+    }
 
     close(client_socket);
     return NULL;

@@ -16,58 +16,63 @@ int main() {
     server_address.sin_port = htons(PORT);
     server_address.sin_addr.s_addr = inet_addr("127.0.0.1");
 
-    // Accounts in user:pass format
-    char *accounts[] = {
-        "admin:admin123",
-        "teacher:teach123",
-        "hamza:hamza123",
-        "tester:tester123"
-    };
-    int num_accounts = 4;
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) {
+        perror("Socket failed");
+        exit(EXIT_FAILURE);
+    }
 
-    // Loop through each account
-    for (int i = 0; i < num_accounts; i++) {
-        int sock = socket(AF_INET, SOCK_STREAM, 0);
-        if (sock < 0) {
-            perror("Socket failed");
-            exit(EXIT_FAILURE);
+    if (connect(sock, (struct sockaddr*)&server_address, sizeof(server_address)) < 0) {
+        perror("Connection failed");
+        close(sock);
+        exit(EXIT_FAILURE);
+    }
+
+    // Prompt for credentials
+    char username[50], password[50], credentials[100];
+    printf("Enter username: ");
+    scanf("%s", username);
+    printf("Enter password: ");
+    scanf("%s", password);
+    snprintf(credentials, sizeof(credentials), "%s:%s", username, password);
+
+    // Send credentials
+    send(sock, credentials, strlen(credentials), 0);
+
+    // Handle authentication response
+    memset(buffer, 0, BUFFER_SIZE);
+    int bytes_read = read(sock, buffer, BUFFER_SIZE);
+    buffer[bytes_read] = '\0';
+
+    if (strcmp(buffer, "OK") != 0) {
+        printf("Authentication failed\n");
+        close(sock);
+        return 0;
+    }
+    printf("Authentication success\n");
+
+    // Command loop
+    while (1) {
+        printf("Enter command (or 'exit' to quit): ");
+        fgets(buffer, BUFFER_SIZE, stdin);
+        buffer[strcspn(buffer, "\n")] = 0;
+
+        if (strlen(buffer) == 0) continue;
+
+        send(sock, buffer, strlen(buffer), 0);
+
+        if (strcmp(buffer, "exit") == 0) {
+            break;
         }
-
-        if (connect(sock, (struct sockaddr*)&server_address, sizeof(server_address)) < 0) {
-            perror("Connection failed");
-            close(sock);
-            continue;
-        }
-
-        // Send credentials
-        send(sock, accounts[i], strlen(accounts[i]), 0);
-
-        // Handle authentication response
-        memset(buffer, 0, BUFFER_SIZE);
-        int bytes_read = read(sock, buffer, BUFFER_SIZE);
-        if (strcmp(buffer, "OK") != 0) {
-            printf("Authentication failed for %s\n", accounts[i]);
-            close(sock);
-            continue;
-        }
-        printf("Authentication success for %s\n", accounts[i]);
-
-        // Encrypted message exchange
-        char message[BUFFER_SIZE] = "Hello from client";
-        int msg_len = pad_data(message, strlen(message));
-        encrypt(message, msg_len);
-        send(sock, message, msg_len, 0);
-        printf("Message encrypted and sent by %s\n", accounts[i]);
 
         memset(buffer, 0, BUFFER_SIZE);
         bytes_read = read(sock, buffer, BUFFER_SIZE);
-        decrypt(buffer, bytes_read);
-        bytes_read = unpad_data(buffer, bytes_read);
-        buffer[bytes_read] = '\0';
-        printf("Server response to %s: %s\n", accounts[i], buffer);
-
-        close(sock);
+        if (bytes_read > 0) {
+            buffer[bytes_read] = '\0';
+            printf("Server response: %s\n", buffer);
+        }
     }
 
+    close(sock);
     return 0;
 }
